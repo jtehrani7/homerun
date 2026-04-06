@@ -206,6 +206,7 @@ function App(){
   const[settingsOpen,setSettingsOpen]=useState(false);
   const[synced,setSynced]=useState(false); // true after first Firebase load
   const isRemoteUpdate=useRef(false);      // prevents save loop
+  const[addPreset,setAddPreset]=useState(null); // {date, time} pre-fill for tap-to-add
 
   // ── Connect to Firebase and listen for live changes ──────────────────────
   useEffect(()=>{
@@ -241,7 +242,7 @@ function App(){
 
   const dayListings=listings.filter(l=>l.date===date).sort((a,b)=>a.startTime.localeCompare(b.startTime));
   const detailListing=detail?listings.find(l=>l.id===detail):null;
-  const dateStrip=Array.from({length:14},(_,i)=>{const d=new Date(today+"T12:00:00");d.setDate(d.getDate()-2+i);return d.toISOString().split("T")[0];});
+  const dateStrip=Array.from({length:33},(_,i)=>{const d=new Date(today+"T12:00:00");d.setDate(d.getDate()-2+i);return d.toISOString().split("T")[0];});
 
   return(
     <div style={{minHeight:"100vh",background:"#f1f5f9",display:"flex",flexDirection:"column",fontFamily:"system-ui,-apple-system,sans-serif",maxWidth:480,margin:"0 auto"}}>
@@ -273,34 +274,48 @@ function App(){
       )}
 
       <div style={{flex:1,overflowY:"auto",paddingBottom:96}}>
-        {view==="timeline"?<TimelineView listings={dayListings} date={date} onSelect={setDetail}/>:<ListView listings={listings} onSelect={setDetail} onDateClick={d=>{setDate(d);setView("timeline");}}/>}
+        {view==="timeline"?<TimelineView listings={dayListings} date={date} onSelect={setDetail} onAddAtTime={(t)=>{setAddOpen(true);setAddPreset({date,time:t});}}/>:<ListView listings={listings} onSelect={setDetail} onDateClick={d=>{setDate(d);setView("timeline");}}/>}
       </div>
 
       <button onClick={()=>setAddOpen(true)} style={{position:"fixed",bottom:24,right:20,width:54,height:54,borderRadius:"50%",background:"linear-gradient(135deg,#6366f1,#4f46e5)",border:"none",cursor:"pointer",color:"white",fontSize:28,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 8px 24px rgba(99,102,241,0.45)",zIndex:30}}>+</button>
       {toast&&<div style={{position:"fixed",top:80,left:"50%",transform:"translateX(-50%)",zIndex:50,padding:"8px 16px",borderRadius:99,background:"#1f2937",color:"white",fontSize:13,fontWeight:600,whiteSpace:"nowrap",boxShadow:"0 4px 16px rgba(0,0,0,0.3)"}}>{toast}</div>}
-      {addOpen&&<AddModal date={date} onAdd={addListing} onClose={()=>setAddOpen(false)}/>}
+      {addOpen&&<AddModal date={addPreset?addPreset.date:date} time={addPreset?addPreset.time:null} onAdd={addListing} onClose={()=>{setAddOpen(false);setAddPreset(null);}}/>}
       {detailListing&&<DetailModal listing={detailListing} p1={p1} p2={p2} onUpdate={upd=>updateListing(detailListing.id,upd)} onDelete={()=>deleteListing(detailListing.id)} onClose={()=>setDetail(null)}/>}
       {settingsOpen&&<SettingsModal p1={p1} p2={p2} setP1={setP1} setP2={setP2} onClose={()=>setSettingsOpen(false)}/>}
     </div>
   );
 }
 
-function TimelineView({listings,date,onSelect}){
+function TimelineView({listings,date,onSelect,onAddAtTime}){
   const hours=Array.from({length:DAY_END-DAY_START},(_,i)=>DAY_START+i);
   const totalH=hours.length*HOUR_H;
   function topOf(time){const[h,m]=time.split(":").map(Number);return((h*60+m-DAY_START*60)/60)*HOUR_H;}
   function htOf(dur){return Math.max((dur/60)*HOUR_H,44);}
   const fmtDateLabel=d=>new Date(d+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"});
+
+  // Detect tap on empty space → open AddModal at that time
+  function handleGridTap(e){
+    // Ignore if tapping a listing card
+    if(e.target.closest("[data-listing]"))return;
+    const rect=e.currentTarget.getBoundingClientRect();
+    const y=e.clientY-rect.top;
+    const totalMinutes=DAY_START*60+Math.round((y/totalH)*(DAY_END-DAY_START)*60);
+    const h=Math.floor(totalMinutes/60);
+    const m=Math.round((totalMinutes%60)/15)*15; // snap to nearest 15 min
+    const clampedH=Math.min(Math.max(h,DAY_START),DAY_END-1);
+    const timeStr=`${String(clampedH).padStart(2,"0")}:${String(m>=60?0:m).padStart(2,"0")}`;
+    onAddAtTime(timeStr);
+  }
   return(
     <div style={{padding:16}}>
       <div style={{fontSize:13,fontWeight:600,color:"#6b7280",marginBottom:12}}>{fmtDateLabel(date)}</div>
-      {listings.length===0&&<div style={{textAlign:"center",paddingTop:64,paddingBottom:64,color:"#9ca3af"}}><div style={{fontSize:48}}>🏠</div><div style={{fontWeight:600,color:"#6b7280",marginTop:8}}>No showings scheduled</div><div style={{fontSize:12,marginTop:4}}>Tap + to add a listing</div></div>}
-      {listings.length>0&&(<div style={{background:"white",borderRadius:16,boxShadow:"0 1px 4px rgba(0,0,0,0.07)",overflow:"hidden"}}><div style={{position:"relative",height:totalH}}>
+      {listings.length>0&&(<div style={{background:"white",borderRadius:16,boxShadow:"0 1px 4px rgba(0,0,0,0.07)",overflow:"hidden"}}><div style={{position:"relative",height:totalH}} onClick={handleGridTap}>
         {hours.map(h=>(<div key={h} style={{position:"absolute",left:0,right:0,display:"flex",alignItems:"flex-start",top:(h-DAY_START)*HOUR_H}}><div style={{textAlign:"right",paddingRight:8,width:44,fontSize:10,color:"#c4c9d4",marginTop:-7,userSelect:"none"}}>{h===12?"12pm":h<12?`${h}am`:`${h-12}pm`}</div><div style={{flex:1,borderTop:"1px solid #f3f4f6"}}/></div>))}
         <div style={{position:"absolute",top:0,bottom:0,right:0,left:44}}>
-          {listings.map(l=>{const plt=PLATFORMS[l.platform]||PLATFORMS.other;const st=STATUS[l.status]||STATUS.scheduled;const top=topOf(l.startTime);const ht=htOf(l.duration||60);const img=l.images&&l.images[0];return(<div key={l.id} onClick={()=>onSelect(l.id)} style={{position:"absolute",left:4,right:8,top:top+2,height:ht-4,background:st.color+"15",borderLeft:`3px solid ${st.color}`,borderRadius:10,cursor:"pointer",overflow:"hidden",display:"flex"}}>{img&&<div style={{width:52,flexShrink:0,overflow:"hidden"}}><img src={img} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}} onError={e=>{e.target.style.display="none";}}/></div>}<div style={{flex:1,padding:8,display:"flex",flexDirection:"column",justifyContent:"center",gap:2,minWidth:0}}><div style={{display:"flex",alignItems:"center",gap:4,flexWrap:"wrap"}}><span style={{color:"white",padding:"1px 6px",borderRadius:4,fontWeight:700,backgroundColor:plt.color,fontSize:9}}>{plt.label}</span><span style={{fontWeight:600,color:"#111827",fontSize:12,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{l.address}</span></div>{ht>50&&<div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",fontSize:11,color:"#6b7280"}}>{l.price&&<span style={{color:"#059669",fontWeight:600}}>${l.price.toLocaleString()}/mo</span>}{l.beds&&<span>{l.beds}bd · {l.baths}ba</span>}{l.rating&&(l.rating.p1||l.rating.p2)&&<span style={{color:"#f59e0b"}}>{"★".repeat(Math.round(((l.rating.p1||0)+(l.rating.p2||0))/([l.rating.p1,l.rating.p2].filter(Boolean).length||1)))}</span>}{l.notes&&l.notes.length>0&&<span>💬{l.notes.length}</span>}</div>}</div></div>);})}
+          {listings.map(l=>{const plt=PLATFORMS[l.platform]||PLATFORMS.other;const st=STATUS[l.status]||STATUS.scheduled;const top=topOf(l.startTime);const ht=htOf(l.duration||60);const img=l.images&&l.images[0];return(<div data-listing="1" key={l.id} onClick={(e)=>{e.stopPropagation();onSelect(l.id);}} style={{position:"absolute",left:4,right:8,top:top+2,height:ht-4,background:st.color+"15",borderLeft:`3px solid ${st.color}`,borderRadius:10,cursor:"pointer",overflow:"hidden",display:"flex"}}>{img&&<div style={{width:52,flexShrink:0,overflow:"hidden"}}><img src={img} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}} onError={e=>{e.target.style.display="none";}}/></div>}<div style={{flex:1,padding:8,display:"flex",flexDirection:"column",justifyContent:"center",gap:2,minWidth:0}}><div style={{display:"flex",alignItems:"center",gap:4,flexWrap:"wrap"}}><span style={{color:"white",padding:"1px 6px",borderRadius:4,fontWeight:700,backgroundColor:plt.color,fontSize:9}}>{plt.label}</span><span style={{fontWeight:600,color:"#111827",fontSize:12,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{l.address}</span></div>{ht>50&&<div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",fontSize:11,color:"#6b7280"}}>{l.price&&<span style={{color:"#059669",fontWeight:600}}>${l.price.toLocaleString()}/mo</span>}{l.beds&&<span>{l.beds}bd · {l.baths}ba</span>}{l.rating&&(l.rating.p1||l.rating.p2)&&<span style={{color:"#f59e0b"}}>{"★".repeat(Math.round(((l.rating.p1||0)+(l.rating.p2||0))/([l.rating.p1,l.rating.p2].filter(Boolean).length||1)))}</span>}{l.notes&&l.notes.length>0&&<span>💬{l.notes.length}</span>}</div>}</div></div>);})}
         </div>
       </div></div>)}
+      {listings.length===0&&<div style={{textAlign:"center",paddingTop:64,paddingBottom:64,color:"#9ca3af",cursor:"pointer"}} onClick={()=>onAddAtTime("10:00")}><div style={{fontSize:48}}>🏠</div><div style={{fontWeight:600,color:"#6b7280",marginTop:8}}>No showings scheduled</div><div style={{fontSize:12,marginTop:4}}>Tap anywhere on the calendar to add one</div></div>}
     </div>
   );
 }
@@ -313,7 +328,7 @@ function ListView({listings,onSelect,onDateClick}){
 }
 
 // ─── Add Modal ─────────────────────────────────────────────────────────────
-function AddModal({date,onAdd,onClose}){
+function AddModal({date,time:presetTime,onAdd,onClose}){
   const[url,setUrl]=useState("");
   const[platform,setPlatform]=useState("other");
   const[pasteText,setPasteText]=useState("");
@@ -323,7 +338,7 @@ function AddModal({date,onAdd,onClose}){
   const[beds,setBeds]=useState("");
   const[baths,setBaths]=useState("");
   const[selDate,setSelDate]=useState(date);
-  const[time,setTime]=useState("10:00");
+  const[time,setTime]=useState(presetTime||"10:00");
   const[duration,setDuration]=useState(60);
   const[images,setImages]=useState([]);
   const[error,setError]=useState("");
@@ -525,38 +540,94 @@ function AddModal({date,onAdd,onClose}){
 }
 
 function DetailModal({listing,p1,p2,onUpdate,onDelete,onClose}){
-  const[note,setNote]=useState("");const[author,setAuthor]=useState(p1);
-  const plt=PLATFORMS[listing.platform]||PLATFORMS.other;const st=STATUS[listing.status]||STATUS.scheduled;
+  const[note,setNote]=useState("");
+  const[author,setAuthor]=useState(p1);
+  const[editing,setEditing]=useState(false);
+  // Edit field state
+  const[eAddr,setEAddr]=useState(listing.address||"");
+  const[ePrice,setEPrice]=useState(listing.price?String(listing.price):"");
+  const[eBeds,setEBeds]=useState(listing.beds||"");
+  const[eBaths,setEBaths]=useState(listing.baths||"");
+  const[eDate,setEDate]=useState(listing.date||today);
+  const[eTime,setETime]=useState(listing.startTime||"10:00");
+  const[eDur,setEDur]=useState(listing.duration||60);
+
+  const plt=PLATFORMS[listing.platform]||PLATFORMS.other;
+  const st=STATUS[listing.status]||STATUS.scheduled;
+
+  function saveEdit(){
+    if(!eAddr.trim())return;
+    onUpdate({address:eAddr.trim(),price:ePrice?+ePrice:null,beds:eBeds,baths:eBaths,date:eDate,startTime:eTime,duration:eDur});
+    setEditing(false);
+  }
   function addNote(){if(!note.trim())return;onUpdate({notes:[...(listing.notes||[]),{text:note,author,timestamp:new Date().toISOString()}]});setNote("");}
   function Stars({value,onChange,name}){return(<div style={{display:"flex",alignItems:"center",gap:4}}><span style={{fontSize:11,color:"#9ca3af",width:64,flexShrink:0}}>{name}</span>{[1,2,3,4,5].map(s=><button key={s} onClick={()=>onChange(s)} style={{fontSize:22,color:s<=(value||0)?"#f59e0b":"#e5e7eb",background:"none",border:"none",cursor:"pointer",padding:0}}>★</button>)}</div>);}
+
+  const inp={width:"100%",marginTop:4,padding:"8px 12px",border:"1px solid #e5e7eb",borderRadius:10,fontSize:13,outline:"none",background:"white"};
+
   return(
     <div style={{position:"fixed",inset:0,zIndex:50,display:"flex",alignItems:"flex-end",background:"rgba(0,0,0,0.45)"}} onClick={onClose}>
       <div style={{background:"white",borderRadius:"24px 24px 0 0",width:"100%",maxWidth:480,margin:"0 auto",overflowY:"auto",maxHeight:"92vh"}} onClick={e=>e.stopPropagation()}>
         {listing.images&&listing.images.length>0&&<div style={{borderRadius:"24px 24px 0 0",overflow:"hidden"}}><PhotoCarousel images={listing.images} aspectRatio="4/3" rounded="none"/></div>}
         <div style={{padding:20}}>
           <div style={{width:40,height:4,borderRadius:99,background:"#e5e7eb",margin:"0 auto 16px"}}/>
+
+          {/* Header row */}
           <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:12}}>
             <div style={{flex:1,paddingRight:12,minWidth:0}}>
-              <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",marginBottom:4}}><span style={{fontSize:11,color:"white",padding:"2px 8px",borderRadius:99,fontWeight:700,backgroundColor:plt.color}}>{plt.label}</span><span style={{fontSize:11,padding:"2px 8px",borderRadius:99,fontWeight:700,background:st.color+"20",color:st.color}}>{st.emoji} {st.label}</span></div>
-              <h2 style={{fontWeight:700,color:"#111827",margin:0,fontSize:16}}>{listing.address}</h2>
-              <div style={{display:"flex",gap:6,marginTop:4,flexWrap:"wrap",fontSize:12,color:"#6b7280"}}><span>{new Date(listing.date+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})}</span><span>·</span><span>{fmtTime(listing.startTime)}</span>{listing.price&&<><span>·</span><span style={{color:"#059669",fontWeight:700}}>${listing.price.toLocaleString()}/mo</span></>}{listing.beds&&<><span>·</span><span>{listing.beds}bd · {listing.baths}ba</span></>}</div>
+              <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",marginBottom:4}}>
+                <span style={{fontSize:11,color:"white",padding:"2px 8px",borderRadius:99,fontWeight:700,backgroundColor:plt.color}}>{plt.label}</span>
+                <span style={{fontSize:11,padding:"2px 8px",borderRadius:99,fontWeight:700,background:st.color+"20",color:st.color}}>{st.emoji} {st.label}</span>
+              </div>
+              {!editing&&<>
+                <h2 style={{fontWeight:700,color:"#111827",margin:0,fontSize:16}}>{listing.address}</h2>
+                <div style={{display:"flex",gap:6,marginTop:4,flexWrap:"wrap",fontSize:12,color:"#6b7280"}}>
+                  <span>{new Date(listing.date+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})}</span>
+                  <span>·</span><span>{fmtTime(listing.startTime)}</span>
+                  {listing.price&&<><span>·</span><span style={{color:"#059669",fontWeight:700}}>${listing.price.toLocaleString()}/mo</span></>}
+                  {listing.beds&&<><span>·</span><span>{listing.beds}bd · {listing.baths}ba</span></>}
+                </div>
+              </>}
             </div>
-            <button onClick={onClose} style={{width:32,height:32,borderRadius:"50%",background:"#f3f4f6",border:"none",cursor:"pointer",fontSize:14,color:"#6b7280",flexShrink:0}}>✕</button>
+            <div style={{display:"flex",gap:6,flexShrink:0}}>
+              <button onClick={()=>setEditing(e=>!e)} style={{height:32,padding:"0 12px",borderRadius:8,background:editing?"#f3f4f6":"#eef2ff",border:"none",cursor:"pointer",fontSize:12,fontWeight:700,color:editing?"#6b7280":"#6366f1"}}>{editing?"Cancel":"✏️ Edit"}</button>
+              <button onClick={onClose} style={{width:32,height:32,borderRadius:"50%",background:"#f3f4f6",border:"none",cursor:"pointer",fontSize:14,color:"#6b7280"}}>✕</button>
+            </div>
           </div>
-          {/* Navigate + View listing row */}
-          <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
-            <a
-              href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(listing.address + ", New York, NY")}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{display:"inline-flex",alignItems:"center",gap:6,padding:"8px 16px",borderRadius:10,background:"linear-gradient(135deg,#10b981,#059669)",color:"white",fontWeight:700,fontSize:13,textDecoration:"none",flexShrink:0}}>
-              🗺️ Navigate
-            </a>
+
+          {/* ── Edit form ── */}
+          {editing&&(
+            <div style={{background:"#f8f9ff",borderRadius:14,padding:14,marginBottom:16,display:"flex",flexDirection:"column",gap:10}}>
+              <div><label style={{fontSize:10,fontWeight:700,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.05em"}}>Address</label><input value={eAddr} onChange={e=>setEAddr(e.target.value)} style={inp}/></div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+                <div><label style={{fontSize:10,fontWeight:700,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.05em"}}>$/mo</label><input type="number" value={ePrice} onChange={e=>setEPrice(e.target.value)} style={inp}/></div>
+                <div><label style={{fontSize:10,fontWeight:700,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.05em"}}>Beds</label><select value={eBeds} onChange={e=>setEBeds(e.target.value)} style={inp}><option value="">—</option>{["Studio","1","2","3","4+"].map(o=><option key={o}>{o}</option>)}</select></div>
+                <div><label style={{fontSize:10,fontWeight:700,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.05em"}}>Baths</label><select value={eBaths} onChange={e=>setEBaths(e.target.value)} style={inp}><option value="">—</option>{["1","1.5","2","2.5","3+"].map(o=><option key={o}>{o}</option>)}</select></div>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                <div><label style={{fontSize:10,fontWeight:700,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.05em"}}>Date</label><input type="date" value={eDate} onChange={e=>setEDate(e.target.value)} style={inp}/></div>
+                <div><label style={{fontSize:10,fontWeight:700,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.05em"}}>Start Time</label><input type="time" value={eTime} onChange={e=>setETime(e.target.value)} style={inp}/></div>
+              </div>
+              <div><label style={{fontSize:10,fontWeight:700,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.05em"}}>Duration</label><select value={eDur} onChange={e=>setEDur(+e.target.value)} style={inp}><option value={30}>30 min</option><option value={60}>1 hour</option><option value={90}>1.5 hours</option><option value={120}>2 hours</option></select></div>
+              <button onClick={saveEdit} style={{width:"100%",padding:"10px 0",background:"linear-gradient(135deg,#6366f1,#4f46e5)",border:"none",borderRadius:10,color:"white",fontWeight:700,fontSize:14,cursor:"pointer",marginTop:4}}>Save Changes ✓</button>
+            </div>
+          )}
+
+          {/* Navigate + View listing */}
+          {!editing&&<div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
+            <a href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(listing.address+", New York, NY")}`} target="_blank" rel="noopener noreferrer" style={{display:"inline-flex",alignItems:"center",gap:6,padding:"8px 16px",borderRadius:10,background:"linear-gradient(135deg,#10b981,#059669)",color:"white",fontWeight:700,fontSize:13,textDecoration:"none",flexShrink:0}}>🗺️ Navigate</a>
             {listing.url&&<a href={listing.url} target="_blank" rel="noopener noreferrer" style={{display:"inline-flex",alignItems:"center",fontSize:12,color:"#6366f1",textDecoration:"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",padding:"8px 0"}}>🔗 View listing ↗</a>}
-          </div>
+          </div>}
+
+          {/* Status */}
           <div style={{marginBottom:16}}><p style={{fontSize:10,fontWeight:700,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>Status</p><div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{Object.entries(STATUS).map(([key,s])=><button key={key} onClick={()=>onUpdate({status:key})} style={{fontSize:11,padding:"4px 12px",borderRadius:99,fontWeight:700,border:"none",cursor:"pointer",background:listing.status===key?s.color:s.color+"18",color:listing.status===key?"white":s.color}}>{s.emoji} {s.label}</button>)}</div></div>
+
+          {/* Ratings */}
           <div style={{borderRadius:16,padding:12,marginBottom:16,background:"#f8f9ff"}}><p style={{fontSize:10,fontWeight:700,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>Your Ratings</p><Stars value={listing.rating&&listing.rating.p1} onChange={v=>onUpdate({rating:{...listing.rating,p1:v}})} name={p1}/><div style={{marginTop:8}}><Stars value={listing.rating&&listing.rating.p2} onChange={v=>onUpdate({rating:{...listing.rating,p2:v}})} name={p2}/></div></div>
+
+          {/* Notes */}
           <div style={{marginBottom:20}}><p style={{fontSize:10,fontWeight:700,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>Notes</p>{(!listing.notes||listing.notes.length===0)&&<p style={{fontSize:13,color:"#9ca3af",fontStyle:"italic",marginBottom:12}}>No notes yet — add impressions from the showing!</p>}<div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:12}}>{(listing.notes||[]).map((n,i)=><div key={i} style={{borderRadius:12,padding:12,background:"#eef2ff"}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:11,fontWeight:700,color:"#6366f1"}}>{n.author}</span><span style={{fontSize:10,color:"#9ca3af"}}>{new Date(n.timestamp).toLocaleDateString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})}</span></div><p style={{fontSize:13,color:"#374151",margin:0}}>{n.text}</p></div>)}</div><div style={{display:"flex",gap:8}}><select value={author} onChange={e=>setAuthor(e.target.value)} style={{border:"1px solid #e5e7eb",borderRadius:12,padding:"8px 10px",fontSize:12,background:"white",color:"#374151",flexShrink:0,outline:"none"}}><option value={p1}>{p1}</option><option value={p2}>{p2}</option></select><input value={note} onChange={e=>setNote(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addNote()} placeholder="Add a note…" style={{flex:1,fontSize:13,border:"1px solid #e5e7eb",borderRadius:12,padding:"8px 12px",outline:"none"}}/><button onClick={addNote} style={{padding:"8px 12px",background:"linear-gradient(135deg,#6366f1,#4f46e5)",border:"none",borderRadius:12,color:"white",fontSize:16,cursor:"pointer",flexShrink:0}}>+</button></div></div>
+
           <button onClick={()=>{if(window.confirm("Remove this listing?"))onDelete();}} style={{width:"100%",padding:"10px 0",borderRadius:12,fontSize:13,fontWeight:600,color:"#f87171",background:"none",border:"none",cursor:"pointer"}}>🗑 Remove listing</button>
         </div>
       </div>
@@ -588,4 +659,3 @@ ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(
 </script>
 </body>
 </html>
-
